@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "lint": "eslint src/"
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "lint": "eslint api/"
   },
   "devDependencies": {
     "eslint": "^9.0.0",
     "globals": "^15.0.0",
-    "wrangler": "^3.0.0"
+    "vercel": "^54.14.5"
   }
 }
