@@ -1,55 +1,61 @@
-# mtrl-proxy
+# mtrl-proxy-vercel
 
-Cloudflare Worker, проксирующий запросы к `api.telegram.org`. Нужен для серверов, у которых нет прямого доступа к Telegram.
+Vercel Edge Functions, проксирующие запросы к Telegram Bot API и пробрасывающие входящие webhook-обновления на сервер mtrl.io.
 
-## Деплой воркера
+Нужен потому что сервер на Timeweb (Россия) не имеет прямого доступа к `api.telegram.org`, а Telegram не может достучаться до mtrl.io напрямую.
+
+## Архитектура
+
+```text
+Исходящие (бот → Telegram):
+  mtrl.io → https://mtrl-proxy-vercel.vercel.app/bot<token>/method → api.telegram.org
+
+Входящие (Telegram → бот):
+  Telegram → https://mtrl-proxy-vercel.vercel.app/webhook → https://mtrl.io/api/tg-auth
+```
+
+## Эндпоинты
+
+| Путь       | Файл              | Назначение                                                    |
+|------------|-------------------|---------------------------------------------------------------|
+| `/webhook` | `api/webhook.js`  | Принимает обновления от Telegram, пробрасывает на `MTRL_WEBHOOK_URL` |
+| `/*`       | `api/proxy.js`    | Все остальные запросы пробрасывает на `api.telegram.org`      |
+
+## Переменные окружения
+
+| Переменная        | Где задаётся     | Описание                                                              |
+|-------------------|------------------|-----------------------------------------------------------------------|
+| `MTRL_WEBHOOK_URL` | Vercel dashboard | URL куда relay пробрасывает webhook. Значение: `https://mtrl.io/api/tg-auth` |
+
+## Деплой
 
 ```bash
 npm install
-wrangler secret put SECRET   # введи любую длинную случайную строку, например: openssl rand -hex 32
-npm run deploy
+vercel deploy --prod
 ```
 
-После деплоя Cloudflare выдаст URL вида `https://mtrl-proxy.<subdomain>.workers.dev`.
+## Настройка на сервере mtrl.io
 
-## Настройка сервера (Timeweb)
+**1. Добавь в `.env`:**
 
-**1. Добавь переменные в `.env`:**
-
-```
-TELEGRAM_API_PROXY_URL=https://mtrl-proxy.<subdomain>.workers.dev
-TELEGRAM_API_PROXY_SECRET=<тот же секрет что вводил в wrangler secret put>
+```env
+TELEGRAM_API_PROXY_URL=https://mtrl-proxy-vercel.vercel.app
 ```
 
-**2. В коде бота при каждом запросе к Telegram Bot API добавляй заголовок `X-Proxy-Secret`.**
+**2. Зарегистрируй webhook** (один раз, после деплоя или смены URL):
 
-Пример на Node.js (axios):
-
-```js
-const axios = require("axios");
-
-const telegram = axios.create({
-  baseURL: process.env.TELEGRAM_API_PROXY_URL,
-  headers: {
-    "X-Proxy-Secret": process.env.TELEGRAM_API_PROXY_SECRET,
-  },
-});
-
-// вместо https://api.telegram.org/bot<TOKEN>/sendMessage
-await telegram.post(`/bot${TOKEN}/sendMessage`, { chat_id, text });
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d "url=https://mtrl-proxy-vercel.vercel.app/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-Пример на Node.js (fetch):
+Ответ должен быть `{"ok":true,"result":true}`.
 
-```js
-await fetch(`${process.env.TELEGRAM_API_PROXY_URL}/bot${TOKEN}/sendMessage`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "X-Proxy-Secret": process.env.TELEGRAM_API_PROXY_SECRET,
-  },
-  body: JSON.stringify({ chat_id, text }),
-});
+**3. Проверь регистрацию:**
+
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 ```
 
-Без заголовка `X-Proxy-Secret` воркер вернёт `403 Forbidden`.
+Поле `url` должно быть `https://mtrl-proxy-vercel.vercel.app/webhook`.
